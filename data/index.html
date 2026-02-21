@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Hexapod Command Center</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <!-- Animation overlay -->
+    <div id="animLayer" class="anim-layer"></div>
+
+    <!-- Top Bar -->
+    <div class="topbar">
+        <div class="topbar-inner">
+            <span class="logo">&#x25C6; HEXAPOD</span>
+            <span class="topbar-desc">Command Center v2.0</span>
+            <div class="topbar-right">
+                <span id="pingDot" class="ping-dot"></span>
+                <span class="topbar-credit">ESP8266 | PCA9685</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main 3-Column Layout -->
+    <div class="main-grid">
+
+        <!-- LEFT COLUMN: Status + Controls -->
+        <div class="col-left">
+
+            <!-- Status Bar -->
+            <div class="panel">
+                <div class="panel-title">SYSTEM STATUS</div>
+                <div id="status" class="status-bar offline">OFFLINE</div>
+                <div id="walkStatus" class="status-walk" style="display:none;"></div>
+                <div class="status-params">
+                    <div class="param">
+                        <span class="param-label">Speed</span>
+                        <span id="paramSpeed" class="param-val">500ms</span>
+                    </div>
+                    <div class="param">
+                        <span class="param-label">Stride</span>
+                        <span id="paramStride" class="param-val">40&deg;</span>
+                    </div>
+                    <div class="param">
+                        <span class="param-label">Height</span>
+                        <span id="paramHeight" class="param-val">0</span>
+                    </div>
+                </div>
+                <!-- System badges -->
+                <div class="badge-row">
+                    <span class="sys-badge wdt-badge">&#x25CF; WDT OFF</span>
+                    <span class="sys-badge wifi-widget-badge">
+                        <span class="wifi-sig">
+                            <span class="ws-bar b1" id="wsb1"></span>
+                            <span class="ws-bar b2" id="wsb2"></span>
+                            <span class="ws-bar b3" id="wsb3"></span>
+                            <span class="ws-bar b4" id="wsb4"></span>
+                        </span>
+                        <span id="rssiVal" class="skel">-- dBm</span>
+                        <span id="wifiQual" class="wifi-qual-lbl skel">--</span>
+                    </span>
+                    <span class="sys-badge" id="robotStateBadge">IDLE</span>
+                </div>
+            </div>
+
+            <!-- Controls: Speed · Stride · Height -->
+            <div class="panel">
+                <div class="panel-title">CONTROLS</div>
+                <div class="ctrl-row">
+                    <span class="ctrl-lbl">SPEED</span>
+                    <input type="range" min="100" max="1000" value="500" id="speedSlider"
+                           onchange="updateSpeed(this.value)" oninput="updateSpeedDisplay(this.value)">
+                    <span id="speedValue" class="ctrl-val">500ms</span>
+                </div>
+                <div class="ctrl-row">
+                    <span class="ctrl-lbl">STRIDE</span>
+                    <input type="range" min="10" max="45" value="40" id="strideSlider"
+                           onchange="updateStride(this.value)" oninput="updateStrideDisplay(this.value)">
+                    <span id="strideValue" class="ctrl-val">40&deg;</span>
+                </div>
+                <div class="ctrl-row">
+                    <span class="ctrl-lbl">HEIGHT</span>
+                    <input type="range" min="-30" max="30" value="0" id="heightSlider"
+                           onchange="updateHeight(this.value)" oninput="updateHeightDisplay(this.value)">
+                    <span id="heightValue" class="ctrl-val">0</span>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="panel">
+                <div class="panel-title">ACTIONS</div>
+                <div class="action-grid">
+                    <button class="abtn" onclick="sendCmd('waveHand',this,'#06b6d4')">WAVE</button>
+                    <button class="abtn" onclick="sendCmd('danceMove',this,'#a78bfa')">DANCE</button>
+                    <button class="abtn" onclick="sendCmd('waveAll_Left',this,'#06b6d4')">WAVE L</button>
+                    <button class="abtn" onclick="sendCmd('waveAll_Right',this,'#06b6d4')">WAVE R</button>
+                    <button class="abtn accent" onclick="setAllServos(90)">CENTER</button>
+                    <button class="abtn accent2" onclick="openServoModal()">SERVOS</button>
+                </div>
+            </div>
+
+            <!-- Satellite Communications -->
+            <div class="panel sat-comms-panel">
+                <div class="panel-title">
+                    SATELLITE LINK
+                    <span id="satLinkBadge" class="sat-badge offline">OFFLINE</span>
+                </div>
+                <div class="sat-status-row">
+                    <div class="sat-indicator">
+                        <span class="sat-dot" id="satDot"></span>
+                        <span id="satStatusText">Not connected</span>
+                    </div>
+                    <div class="sat-action-btns">
+                        <button class="abtn sat-connect-btn" id="btnSatConnect" onclick="satConnect()">CONNECT</button>
+                        <button class="abtn sat-disconnect-btn" id="btnSatDisconnect" onclick="satDisconnect()" style="display:none;">DISCONNECT</button>
+                    </div>
+                </div>
+                <div id="satInfoRow" class="sat-info-row" style="display:none;">
+                    <span class="sat-info-item">&#x1F4E1; SATCOM-ALPHA</span>
+                    <span class="sat-info-item" id="satStaIP">--</span>
+                </div>
+
+                <!-- Chat section (visible when connected) -->
+                <div id="satChatSection" class="sat-chat-section" style="display:none;">
+                    <div class="sat-chat-label">COMM CHANNEL</div>
+                    <!-- Recipient selector -->
+                    <div class="sat-rcpt-row">
+                        <span class="sat-rcpt-label">TO:</span>
+                        <button class="sat-rcpt-btn active" id="rcpt-satellite" onclick="setSatRecipient('satellite')">SATELLITE</button>
+                        <button class="sat-rcpt-btn" id="rcpt-rover" onclick="setSatRecipient('rover')">ROVER</button>
+                        <button class="sat-rcpt-btn" id="rcpt-all" onclick="setSatRecipient('all')">BOTH</button>
+                    </div>
+                    <div id="satChatLog" class="sat-chat-log"></div>
+                    <div class="sat-chat-input-row">
+                        <input type="text" id="satChatInput" class="sat-chat-input"
+                               placeholder="Type message..." maxlength="120"
+                               onkeydown="if(event.key==='Enter') satSendChat()">
+                        <button class="abtn sat-send-btn" onclick="satSendChat()">&#x27A4;</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- CENTER COLUMN: Camera + Sensors -->
+        <div class="col-center">
+
+            <!-- Camera -->
+            <div class="panel camera-panel">
+                <div class="panel-title">CAMERA FEED
+                    <span class="cam-ip">192.168.5.2:81</span>
+                </div>
+                <div class="camera-feed" id="cameraFeedBox">
+                    <img id="cameraStream" alt="Stream"
+                         onerror="camFail()" onload="camFrameLoaded()">
+                    <div id="camError" class="cam-error" style="display:none;">
+                        <div class="cam-error-icon">&#x26A0;</div>
+                        <div>Camera offline</div>
+                        <div class="cam-error-sub">192.168.5.2:81</div>
+                    </div>
+                    <!-- Camera overlay -->
+                    <div class="cam-overlay" id="camOverlay">
+                        <span id="camLiveBadge" class="cam-live-badge">&#x25CF; LIVE</span>
+                        <span id="camFps" class="cam-fps">-- FPS</span>
+                        <span class="cam-angle-tl" id="camOverlayPan">PAN 90&deg;</span>
+                        <span class="cam-angle-tr" id="camOverlayTilt">TILT 90&deg;</span>
+                        <!-- Crosshair -->
+                        <div class="cam-crosshair" id="camCrosshair">
+                            <div class="ch-h"></div>
+                            <div class="ch-v"></div>
+                            <div class="ch-dot"></div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Compact toolbar + pan/tilt in one bar -->
+                <div class="cam-bar">
+                    <button class="cam-tb-btn" id="btnCrosshair" onclick="toggleCrosshair()" title="Crosshair">&#x2316;</button>
+                    <button class="cam-tb-btn" onclick="reloadCam()" title="Reload">&#x21BA;</button>
+                    <div class="cam-bar-sep"></div>
+                    <span class="cam-bar-lbl">PAN</span>
+                    <input type="range" min="0" max="180" value="90" id="panSlider" class="cam-bar-slider" oninput="setCamServo('pan',this.value)">
+                    <span id="panVal" class="cam-bar-val">90&deg;</span>
+                    <div class="cam-bar-sep"></div>
+                    <span class="cam-bar-lbl">TILT</span>
+                    <input type="range" min="0" max="180" value="90" id="tiltSlider" class="cam-bar-slider" oninput="setCamServo('tilt',this.value)">
+                    <span id="tiltVal" class="cam-bar-val">90&deg;</span>
+                    <div class="cam-bar-sep"></div>
+                    <button class="cam-tb-btn" onclick="centerCam()" title="Center camera">&#x229B;</button>
+                </div>
+            </div>
+
+            <!-- Sensor Values -->
+            <div class="panel sensor-panel">
+                <div class="panel-title">ENVIRONMENT SENSORS</div>
+                <div class="sensor-row">
+                    <div class="sensor-box">
+                        <div class="sensor-icon temp-icon">&#x1F321;</div>
+                        <div class="sensor-label">TEMP</div>
+                        <div class="sensor-data">
+                            <span id="tempValue" class="sensor-num skel">--</span>
+                            <span class="sensor-unit">&deg;C</span>
+                        </div>
+                        <div class="sensor-bar"><div id="tempBar" class="sensor-fill temp-fill skel-bar"></div></div>
+                    </div>
+                    <div class="sensor-box">
+                        <div class="sensor-icon hum-icon">&#x1F4A7;</div>
+                        <div class="sensor-label">HUMIDITY</div>
+                        <div class="sensor-data">
+                            <span id="humValue" class="sensor-num skel">--</span>
+                            <span class="sensor-unit">%</span>
+                        </div>
+                        <div class="sensor-bar"><div id="humBar" class="sensor-fill hum-fill skel-bar"></div></div>
+                    </div>
+                    <div class="sensor-box">
+                        <div class="sensor-icon">&#x1F32B;</div>
+                        <div class="sensor-label">AQI</div>
+                        <div class="sensor-data">
+                            <span id="aqiValue" class="sensor-num skel">--</span>
+                        </div>
+                        <div id="aqiCat" class="aqi-cat skel">--</div>
+                        <div class="sensor-bar"><div id="aqiBar" class="sensor-fill aqi-fill skel-bar"></div></div>
+                    </div>
+                    <div class="sensor-box">
+                        <div class="sensor-icon">&#x1F4A8;</div>
+                        <div class="sensor-label">CO&#x2082; EST.</div>
+                        <div class="sensor-data">
+                            <span id="co2Value" class="sensor-num skel">--</span>
+                            <span class="sensor-unit">ppm</span>
+                        </div>
+                        <div class="sensor-bar"><div id="co2Bar" class="sensor-fill co2-fill skel-bar"></div></div>
+                        <div id="co2Status" class="co2-status skel">--</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT COLUMN: D-Pad + Hexapod Visualizer + Log -->
+        <div class="col-right">
+
+            <!-- Movement D-Pad -->
+            <div class="panel dpad-panel">
+                <div class="panel-title">MOVEMENT</div>
+                <div class="dpad">
+                    <button id="dbtn-up"     class="dpad-btn up"     onclick="sendCmd('startWalk',this,'#3b82f6')">&#9650;<span class="key-hint">W</span></button>
+                    <button id="dbtn-left"   class="dpad-btn left"   onclick="sendCmd('startTurnLeft',this,'#06b6d4')">&#9664;<span class="key-hint">A</span></button>
+                    <button id="dbtn-center" class="dpad-btn center" onclick="sendCmd('stopWalk',this,'#ef4444')">STOP<span class="key-hint">SPC</span></button>
+                    <button id="dbtn-right"  class="dpad-btn right"  onclick="sendCmd('startTurnRight',this,'#06b6d4')">&#9654;<span class="key-hint">D</span></button>
+                    <button id="dbtn-down"   class="dpad-btn down"   onclick="sendCmd('startWalkBackward',this,'#3b82f6')">&#9660;<span class="key-hint">S</span></button>
+                </div>
+                <div class="kbd-note">Move: W A S D / Space &nbsp;|&nbsp; Camera: Arrow Keys</div>
+            </div>
+
+            <!-- Hexapod Visualizer -->
+            <div class="panel hex-vis-panel">
+                <div class="panel-title">HEX STATUS</div>
+                <div class="hex-vis">
+                    <svg id="hexSvg" viewBox="0 0 120 100" class="hex-svg">
+                        <!-- Glow filter -->
+                        <defs>
+                            <filter id="glow">
+                                <feGaussianBlur stdDeviation="2" result="blur"/>
+                                <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                            </filter>
+                        </defs>
+                        <!-- Ground signal particles spawned by JS -->
+                        <g id="hexParticles"></g>
+                        <!-- Legs -->
+                        <line id="leg1" class="hex-leg" x1="44" y1="33" x2="18" y2="18"/>
+                        <line id="leg2" class="hex-leg" x1="40" y1="50" x2="12" y2="50"/>
+                        <line id="leg3" class="hex-leg" x1="44" y1="67" x2="18" y2="82"/>
+                        <line id="leg4" class="hex-leg" x1="76" y1="33" x2="102" y2="18"/>
+                        <line id="leg5" class="hex-leg" x1="80" y1="50" x2="108" y2="50"/>
+                        <line id="leg6" class="hex-leg" x1="76" y1="67" x2="102" y2="82"/>
+                        <!-- Body -->
+                        <ellipse cx="60" cy="50" rx="20" ry="26" class="hex-body"/>
+                        <!-- Eye / camera dot -->
+                        <circle cx="60" cy="36" r="4" class="hex-eye"/>
+                        <circle cx="60" cy="36" r="2" class="hex-pupil"/>
+                        <!-- Foot dots -->
+                        <circle class="hex-foot" cx="18" cy="18" r="3"/>
+                        <circle class="hex-foot" cx="12" cy="50" r="3"/>
+                        <circle class="hex-foot" cx="18" cy="82" r="3"/>
+                        <circle class="hex-foot" cx="102" cy="18" r="3"/>
+                        <circle class="hex-foot" cx="108" cy="50" r="3"/>
+                        <circle class="hex-foot" cx="102" cy="82" r="3"/>
+                    </svg>
+                    <div id="hexStatusLabel" class="hex-status-label">IDLE</div>
+                </div>
+            </div>
+
+            <!-- Activity Log -->
+            <div class="panel log-panel">
+                <div class="panel-title">ACTIVITY</div>
+                <div id="activityLog" class="activity-log"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Servo Test Modal -->
+    <div id="servoModal" class="modal-overlay" onclick="if(event.target===this)closeServoModal()">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>SERVO TEST PANEL</h2>
+                <button class="modal-close" onclick="closeServoModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="pca-section">
+                    <div class="pca-header">PCA2 (0x41) — Left Side: Legs 1, 2, 3</div>
+                    <div class="servo-grid" id="pca2Grid"></div>
+                </div>
+                <div class="pca-section">
+                    <div class="pca-header">PCA1 (0x40) — Right Side: Legs 4, 5, 6</div>
+                    <div class="servo-grid" id="pca1Grid"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/script.js"></script>
+</body>
+</html>
