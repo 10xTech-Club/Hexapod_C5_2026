@@ -146,7 +146,7 @@ body {
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-columns: 268px 1fr 230px;
+    grid-template-columns: repeat(3, 1fr);
     gap: 10px;
     padding: 10px;
     overflow: hidden;
@@ -1114,21 +1114,109 @@ body {
 }
 
 /* ─── Responsive ─────────────────────────────────────────────── */
+
+/* ── Tablet / large mobile (≤960px) ─────────────────────────── */
 @media (max-width: 960px) {
-    html, body { overflow: auto; }
+    html, body { overflow: auto; height: auto; }
+
     .main-grid {
         grid-template-columns: 1fr;
         overflow: visible;
+        gap: 8px;
+        /* Remove the fixed viewport height constraint */
+        min-height: unset;
     }
+
     .col-left, .col-center, .col-right {
         overflow: visible;
+        min-height: unset;
     }
-    .col-right { order: -1; }
-    .dpad { grid-template-columns: 66px 66px 66px; grid-template-rows: 66px 66px 66px; }
-    .camera-feed { max-height: 260px; }
-    .sensor-row { grid-template-columns: 1fr; }
+
+    /* Order: D-pad first → Camera+Sensors → Status/Controls */
+    .col-right  { order: 1; }
+    .col-center { order: 2; }
+    .col-left   { order: 3; }
+
+    /* Bigger d-pad buttons for touch */
+    .dpad {
+        grid-template-columns: 70px 70px 70px;
+        grid-template-rows: 70px 70px 70px;
+    }
+    .dpad-btn { font-size: 1.2em; }
+
+    /* Camera: stop it from growing to fill column height */
+    .camera-panel {
+        flex: 0 0 auto;
+    }
+    .camera-feed {
+        flex: none;          /* override flex:1 1 0 so height is respected */
+        height: 250px;
+        max-height: 250px;
+    }
+
+    /* 2×2 sensor grid instead of 4-in-a-row */
+    .sensor-row { grid-template-columns: 1fr 1fr; }
+
     .hex-vis-panel { display: none; }
-    .log-panel { max-height: 140px; }
+    .log-panel { flex: 0 0 auto; max-height: 140px; }
+}
+
+/* ── Phone (≤480px) ──────────────────────────────────────────── */
+@media (max-width: 480px) {
+    /* Slim top bar */
+    .topbar-inner { padding: 0 12px; gap: 8px; }
+    .logo { font-size: 1em; letter-spacing: 2px; }
+    .topbar-desc { display: none; }
+    .topbar-credit { display: none; }
+
+    /* Tighter grid */
+    .main-grid { padding: 6px; gap: 6px; }
+    .panel { padding: 10px; }
+    .panel-title { font-size: 0.62em; margin-bottom: 8px; }
+
+    /* Extra-large d-pad for thumb control */
+    .dpad {
+        grid-template-columns: 78px 78px 78px;
+        grid-template-rows: 78px 78px 78px;
+    }
+    .dpad-btn { font-size: 1.4em; }
+    .kbd-note { font-size: 0.5em; }
+
+    /* Camera: strict fixed height on phones */
+    .camera-panel { flex: 0 0 auto; }
+    .camera-feed {
+        flex: none;          /* override flex:1 1 0 so height is respected */
+        height: 200px;
+        max-height: 200px;
+    }
+
+    /* Pan/tilt bar wraps to two rows */
+    .cam-bar { flex-wrap: wrap; gap: 4px; }
+    .cam-bar-slider { min-width: 80px; }
+
+    /* Sensors 2×2 */
+    .sensor-row { grid-template-columns: 1fr 1fr; gap: 6px; }
+    .sensor-num { font-size: 1.2em; }
+    .sensor-box { padding: 8px 6px; }
+
+    /* Action buttons: larger tap targets */
+    .abtn { padding: 12px 6px; font-size: 0.72em; }
+
+    /* Status params */
+    .status-params { gap: 4px; }
+    .param { padding: 6px 3px; }
+    .param-val { font-size: 0.9em; }
+
+    /* Controls sliders */
+    .ctrl-lbl { min-width: 38px; font-size: 0.55em; }
+    .ctrl-val  { min-width: 38px; font-size: 0.78em; }
+
+    /* Satellite chat */
+    .sat-chat-log { height: 90px; }
+    .sat-rcpt-btn { font-size: 9px; padding: 3px 4px; }
+
+    /* Activity log */
+    .log-panel { max-height: 110px; }
 }
 
 /* ─── Satellite Communications Panel ───────────────────────────── */
