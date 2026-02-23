@@ -1348,6 +1348,12 @@ body {
     letter-spacing: 0.08em;
     flex-shrink: 0;
 }
+.sat-rcpt-note {
+    margin: 2px 0 6px;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.03em;
+}
 .sat-rcpt-btn {
     flex: 1;
     padding: 3px 6px;

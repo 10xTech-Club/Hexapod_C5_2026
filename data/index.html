@@ -128,9 +128,10 @@
                     <div class="sat-rcpt-row">
                         <span class="sat-rcpt-label">TO:</span>
                         <button class="sat-rcpt-btn active" id="rcpt-satellite" onclick="setSatRecipient('satellite')">SATELLITE</button>
-                        <button class="sat-rcpt-btn" id="rcpt-rover" onclick="setSatRecipient('rover')">ROVER</button>
+                        <button class="sat-rcpt-btn" id="rcpt-rover" onclick="setSatRecipient('rover')">ROVER VIA SAT</button>
                         <button class="sat-rcpt-btn" id="rcpt-all" onclick="setSatRecipient('all')">BOTH</button>
                     </div>
+                    <div class="sat-rcpt-note">Direct hexapod-to-rover chat is disabled. Satellite relays all messages.</div>
                     <div id="satChatLog" class="sat-chat-log"></div>
                     <div class="sat-chat-input-row">
                         <input type="text" id="satChatInput" class="sat-chat-input"

@@ -10,19 +10,29 @@
 #include <LittleFS.h>
 #include <DHT.h>
 
-// ── WebSocket Log Streaming (OTA-friendly debug output) ──────────────────────
-// WS_LOGGING true  → LOG()/LOGF() mirror output to the WebSocket dashboard as
-//                    {"type":"log","msg":"..."} — readable without a USB cable.
-// WS_LOGGING false → LOG()/LOGF() fall back to Serial.println/printf only.
-//                    Zero WebSocket overhead in production.
-#define WS_LOGGING true
+// ── Debug Logging ─────────────────────────────────────────────────────────────
+// Controlled by the PlatformIO build environment — do NOT hard-code here.
+//   nodemcuv2       (production) → DEBUG_LOGGING=0 : pure no-op, zero overhead
+//   nodemcuv2_debug (debug)      → DEBUG_LOGGING=1 : Serial + WebSocket stream
+//
+// When DEBUG_LOGGING=1:
+//   LOG/LOGF → Serial.println/printf + wsLogEnqueue (WS dashboard).
+//   CORE_DEBUG_LEVEL=3 + DEBUG_ESP_PORT=Serial expose WiFi/ESP-NOW/WS internals.
+//
+// When DEBUG_LOGGING=0 (default):
+//   LOG/LOGF expand to ((void)0) — no String built, no UART write, no WS traffic.
+//   CORE_DEBUG_LEVEL/DEBUG_ESP_PORT are not defined → framework stays completely silent.
+#ifndef DEBUG_LOGGING
+#  define DEBUG_LOGGING 0   // overridden by -DDEBUG_LOGGING=1 in platformio.ini
+#endif
 
-#if WS_LOGGING
-  #define LOG(msg)  wsLogEnqueue(String(msg).c_str())
-  #define LOGF(...) do { char _b[96]; snprintf(_b, sizeof(_b), __VA_ARGS__); wsLogEnqueue(_b); } while(0)
+#if DEBUG_LOGGING
+  #define LOG(msg)   do { Serial.println(msg); wsLogEnqueue(String(msg).c_str()); } while(0)
+  #define LOGF(...)  do { Serial.printf(__VA_ARGS__); \
+                          char _b[96]; snprintf(_b, sizeof(_b), __VA_ARGS__); wsLogEnqueue(_b); } while(0)
 #else
-  #define LOG(msg)  Serial.println(msg)
-  #define LOGF(...) Serial.printf(__VA_ARGS__)
+  #define LOG(msg)   ((void)0)   // compile-time no-op — no String built, no Serial write
+  #define LOGF(...)  ((void)0)
 #endif
 
 // Function declarations
@@ -48,8 +58,8 @@ void onEspNowRecv(uint8_t *mac, uint8_t *data, uint8_t len);
 void sendTelemetryEspNow();
 void broadcastSatStatus();
 
-// WS log streaming declarations
-#if WS_LOGGING
+// Debug log streaming declarations (only compiled when DEBUG_LOGGING is true)
+#if DEBUG_LOGGING
 void wsLogEnqueue(const char* msg);
 void wsLogFlush();
 #endif
@@ -72,6 +82,42 @@ IPAddress subnet(255, 255, 255, 0);
 #define ESPNOW_MSG_COMMAND    0x02   // satellite → hexapod
 #define ESPNOW_MSG_CHAT       0x03   // bidirectional
 #define ESPNOW_DEVICE_HEXAPOD 0x01   // device-type tag in telemetry[1]
+
+#define DEVICE_ID_SATELLITE 0x01
+#define DEVICE_ID_ROVER 0x02
+#define DEVICE_ID_HEXAPOD 0x03
+#define DEVICE_ID_BROADCAST 0xFF
+
+#define ESPNOW_PKT_CHAT 0x91
+#define ESPNOW_PKT_COMMAND 0x92
+#define ESPNOW_PKT_MIRROR_LOG 0x93
+
+struct __attribute__((packed)) EspNowHeader {
+  uint8_t sender_id;
+  uint8_t receiver_id;
+  uint8_t packet_type;
+  uint16_t sequence_no;
+};
+
+struct __attribute__((packed)) EspNowCommandV2 {
+  EspNowHeader header;
+  char cmd[16];
+};
+
+struct __attribute__((packed)) EspNowChatV2 {
+  EspNowHeader header;
+  char from[16];
+  char to[16];
+  char msg[64];
+};
+
+struct __attribute__((packed)) EspNowMirrorLogV2 {
+  EspNowHeader header;
+  uint8_t original_sender;
+  uint8_t original_receiver;
+  uint8_t original_packet_type;
+  char msg[64];
+};
 
 struct __attribute__((packed)) EspNowTelemetry {
   uint8_t  msgType;           // ESPNOW_MSG_TELEMETRY
@@ -96,10 +142,22 @@ struct __attribute__((packed)) EspNowCommand {
 struct __attribute__((packed)) EspNowChat {
   uint8_t  msgType;           // ESPNOW_MSG_CHAT
   char     from[16];
+  char     to[16];            // intended recipient: "satellite" | "hexapod" | "rover" | "all"
   char     msg[64];
-};  // 81 bytes
+};  // 97 bytes
 
-static uint8_t satMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};  // broadcast peer
+// ── SATELLITE MAC ADDRESS — FILL THIS IN ──────────────────────────────────────
+// Flash the satellite, open Serial Monitor, read:
+//   "[ESP-NOW] Satellite AP MAC: XX:XX:XX:XX:XX:XX"
+// Paste those 6 bytes here, then reflash the hexapod.
+static uint8_t satMac[6] = {0x3C, 0x8A, 0x1F, 0x7E, 0x33, 0x55}; // Satellite ESP32 AP MAC
+// ─────────────────────────────────────────────────────────────────────────────
+static uint16_t localSeqNo = 0;
+
+static uint16_t nextSequence() {
+  localSeqNo++;
+  return localSeqNo;
+}
 
 bool          satEnabled         = false;   // user toggles via dashboard
 unsigned long lastSatTelemetry   = 0;
@@ -193,10 +251,10 @@ bool pendingStopBroadcast = false;
 // Set whenever satStatus needs broadcasting from inside a WS callback; sent in loop().
 bool pendingSatStatusBroadcast = false;
 
-// Circular queue for deferred WebSocket log messages (WS_LOGGING only).
+// Circular queue for deferred WebSocket log messages (DEBUG_LOGGING only).
 // Entries are written from any context (including callbacks) and flushed
 // safely from loop() via broadcastTXT — no re-entrancy risk.
-#if WS_LOGGING
+#if DEBUG_LOGGING
 static char    wsLogQueue[4][96];   // 4 slots × 95 chars + null
 static uint8_t wsLogHead = 0;
 static uint8_t wsLogTail = 0;
@@ -450,12 +508,12 @@ bool handleFileRead(String path) {
   return false;
 }
 
-// ── WS log implementation ─────────────────────────────────────────────────────
-#if WS_LOGGING
-// Called from any context (callback or loop). Always prints to Serial and
-// enqueues for WebSocket delivery. Silently drops when the queue is full.
+// ── Debug log implementation ──────────────────────────────────────────────────
+#if DEBUG_LOGGING
+// Enqueues a message for WebSocket delivery.
+// Serial output is already handled by the LOG/LOGF macros — no duplication here.
+// Silently drops when the 4-slot circular queue is full.
 void wsLogEnqueue(const char* msg) {
-  Serial.println(msg);
   uint8_t next = (wsLogHead + 1) & 3;   // circular mod-4
   if (next != wsLogTail) {              // drop silently when full
     strncpy(wsLogQueue[wsLogHead], msg, 95);
@@ -494,11 +552,30 @@ void setup() {
   // ── Reset Reason Diagnostic ──────────────────────────────────────────────
   // Log why the chip restarted. Helps distinguish WDT resets (software/hardware
   // watchdog), exception crashes, power-on, and OTA-initiated resets.
-  LOG("\n=== BOOT ===");
+  LOG("\n===== HEXAPOD BOOT =====");
   LOG("Reset reason : " + ESP.getResetReason());
   LOG("Reset info   : " + ESP.getResetInfo());
   LOG("Free heap    : " + String(ESP.getFreeHeap()) + " bytes");
-  LOG("============");
+  LOG("Chip ID      : " + String(ESP.getChipId(), HEX));
+  LOG("Flash size   : " + String(ESP.getFlashChipRealSize() / 1024) + " KB");
+
+  // When the previous run crashed with an exception (hardware fault / null pointer /
+  // stack overflow etc.), print the low-level registers so the exact fault address
+  // can be decoded with the ELF symbol table.
+  const rst_info* ri = ESP.getResetInfoPtr();
+  if (ri && ri->reason == REASON_EXCEPTION_RST) {
+    LOG("!!! EXCEPTION CRASH DETECTED !!!");
+    LOGF("  Exception cause : %d\n",       ri->exccause);   // 0=illegal instr, 28=LoadStoreAlignmentCause …
+    LOGF("  EPC1 (fault PC) : 0x%08X\n",  ri->epc1);       // program counter at crash
+    LOGF("  EPC2            : 0x%08X\n",  ri->epc2);
+    LOGF("  EPC3            : 0x%08X\n",  ri->epc3);
+    LOGF("  Exception vaddr : 0x%08X\n",  ri->excvaddr);    // bad memory address accessed
+    LOGF("  DEPC            : 0x%08X\n",  ri->depc);
+  } else if (ri) {
+    // 0=Power-on, 1=HW watchdog, 3=SW watchdog, 4=SW restart/OTA, 5=Deep-sleep, 6=Ext reset
+    LOGF("  Raw reset code  : %d\n", ri->reason);
+  }
+  LOG("========================");
 
   // Initialize LittleFS
   if (!LittleFS.begin()) {
@@ -562,6 +639,11 @@ void setup() {
 
   LOG("WiFi AP started: " + String(ssid));
   LOGF("AP IP: %s", WiFi.softAPIP().toString().c_str());
+  // Print AP MAC so you can copy it into the satellite's HEXAPOD_MAC field.
+  uint8_t apMac[6];
+  WiFi.softAPmacAddress(apMac);
+  Serial.printf("[ESP-NOW] Hexapod AP MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
+                apMac[0], apMac[1], apMac[2], apMac[3], apMac[4], apMac[5]);
 
   // Serve files from LittleFS
   server.onNotFound([]() {
@@ -613,7 +695,7 @@ void loop() {
 
   // Flush any queued log messages to the WebSocket dashboard.
   // Must run after webSocket.loop() returns so we are outside any callback.
-#if WS_LOGGING
+#if DEBUG_LOGGING
   wsLogFlush();
 #endif
 
@@ -1069,15 +1151,24 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
       }
       else if (strcmp(msgType, "sendChat") == 0) {
         String chatMsg = doc["msg"].as<String>();
+        String chatTo  = doc["to"].as<String>();
+        if (chatTo.isEmpty()) chatTo = "satellite";
         if (satEnabled && chatMsg.length() > 0) {
-          EspNowChat pkt;
-          pkt.msgType = ESPNOW_MSG_CHAT;
+          EspNowChatV2 pkt = {};
+          pkt.header.sender_id = DEVICE_ID_HEXAPOD;
+          // Enforce hub relay: hexapod sends chat only to satellite.
+          pkt.header.receiver_id = DEVICE_ID_SATELLITE;
+          pkt.header.packet_type = ESPNOW_PKT_CHAT;
+          pkt.header.sequence_no = nextSequence();
           strncpy(pkt.from, "hexapod", sizeof(pkt.from) - 1);
           pkt.from[sizeof(pkt.from) - 1] = '\0';
+          strncpy(pkt.to, chatTo.c_str(), sizeof(pkt.to) - 1);
+          pkt.to[sizeof(pkt.to) - 1] = '\0';
           strncpy(pkt.msg, chatMsg.c_str(), sizeof(pkt.msg) - 1);
           pkt.msg[sizeof(pkt.msg) - 1] = '\0';
           esp_now_send(satMac, (uint8_t*)&pkt, sizeof(pkt));
-          LOG("[SAT] Chat sent: " + chatMsg);
+
+          LOG("[SAT] Chat sent to " + chatTo + ": " + chatMsg);
         }
       }
       break;
@@ -1269,10 +1360,15 @@ void initEspNow() {
   esp_now_register_send_cb(onEspNowSent);
   esp_now_register_recv_cb(onEspNowRecv);
 
-  // Add broadcast peer on channel 6 — matches the satellite AP channel.
-  // No encryption; key = NULL.
-  esp_now_add_peer(satMac, ESP_NOW_ROLE_COMBO, 6, NULL, 0);
-  LOG("[ESP-NOW] Initialized — broadcast peer on ch 6");
+  // Register satellite as unicast peer on channel 6.
+  // satMac must be filled in with the satellite's AP MAC (see top of file).
+  int r = esp_now_add_peer(satMac, ESP_NOW_ROLE_COMBO, 6, NULL, 0);
+  if (r == 0)
+    Serial.printf("[ESP-NOW] Satellite peer registered: %02X:%02X:%02X:%02X:%02X:%02X\n",
+                  satMac[0], satMac[1], satMac[2], satMac[3], satMac[4], satMac[5]);
+  else
+    Serial.println("[ESP-NOW] WARNING: Satellite peer failed — update satMac");
+  LOG("[ESP-NOW] Initialized — unicast satellite peer on ch 6");
 }
 
 // Called from WiFi task after each esp_now_send().
@@ -1288,6 +1384,33 @@ void onEspNowRecv(uint8_t *mac, uint8_t *data, uint8_t len) {
   (void)mac;
   if (len < 1) return;
 
+  if (len >= sizeof(EspNowHeader)) {
+    const EspNowHeader* header = (const EspNowHeader*)data;
+    const bool isV2Type = header->packet_type == ESPNOW_PKT_COMMAND ||
+                          header->packet_type == ESPNOW_PKT_CHAT ||
+                          header->packet_type == ESPNOW_PKT_MIRROR_LOG;
+    if (isV2Type) {
+      if (header->receiver_id != DEVICE_ID_HEXAPOD && header->receiver_id != DEVICE_ID_BROADCAST) return;
+
+      if (header->packet_type == ESPNOW_PKT_COMMAND && len >= sizeof(EspNowCommandV2)) {
+        const EspNowCommandV2* pkt = (const EspNowCommandV2*)data;
+        strncpy(pendingEspNowCmd, pkt->cmd, sizeof(pendingEspNowCmd) - 1);
+        pendingEspNowCmd[sizeof(pendingEspNowCmd) - 1] = '\0';
+        hasPendingEspNowCmd = true;
+      }
+      else if (header->packet_type == ESPNOW_PKT_CHAT && len >= sizeof(EspNowChatV2)) {
+        const EspNowChatV2* pkt = (const EspNowChatV2*)data;
+        if (header->sender_id == DEVICE_ID_HEXAPOD || strncmp(pkt->from, "hexapod", 7) == 0) return;
+        strncpy(pendingEspNowChatFrom, pkt->from, sizeof(pendingEspNowChatFrom) - 1);
+        pendingEspNowChatFrom[sizeof(pendingEspNowChatFrom) - 1] = '\0';
+        strncpy(pendingEspNowChatMsg, pkt->msg, sizeof(pendingEspNowChatMsg) - 1);
+        pendingEspNowChatMsg[sizeof(pendingEspNowChatMsg) - 1] = '\0';
+        hasPendingEspNowChat = true;
+      }
+      return;
+    }
+  }
+
   uint8_t msgType = data[0];
 
   if (msgType == ESPNOW_MSG_COMMAND && len >= sizeof(EspNowCommand)) {
@@ -1298,6 +1421,9 @@ void onEspNowRecv(uint8_t *mac, uint8_t *data, uint8_t len) {
   }
   else if (msgType == ESPNOW_MSG_CHAT && len >= sizeof(EspNowChat)) {
     const EspNowChat* pkt = (const EspNowChat*)data;
+    // Echo filter: satellite may broadcast our own relayed message before it
+    // learns the rover's unicast MAC. Ignore any packet that claims "hexapod".
+    if (strncmp(pkt->from, "hexapod", 7) == 0) return;
     strncpy(pendingEspNowChatFrom, pkt->from, sizeof(pendingEspNowChatFrom) - 1);
     pendingEspNowChatFrom[sizeof(pendingEspNowChatFrom) - 1] = '\0';
     strncpy(pendingEspNowChatMsg, pkt->msg, sizeof(pendingEspNowChatMsg) - 1);

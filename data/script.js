@@ -127,7 +127,7 @@ function satSendChat() {
     if (!msg || !satConnected) return;
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'sendChat', msg: msg, to: satRecipient }));
-        var toLabel = satRecipient === 'all' ? 'BOTH' : satRecipient.toUpperCase();
+        var toLabel = satRecipient === 'all' ? 'BOTH VIA SAT' : (satRecipient.toUpperCase() + ' VIA SAT');
         satAddMessage('me', msg, toLabel);
         input.value = '';
     }
