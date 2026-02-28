@@ -1,0 +1,430 @@
+==============================================================
+         UNDERSTAND YOUR CODE  -  HEXAPOD ROBOT GUIDE
+         Written for young robot builders!
+==============================================================
+
+
+WHAT IS THIS ROBOT?
+-------------------
+Your robot is called a HEXAPOD. That means it has SIX LEGS,
+just like a real insect! Each leg has three parts that can
+move - that is 18 tiny motors (called SERVOS) in total.
+
+The brain of the robot is a small computer chip called the
+ESP8266. You program it, it remembers your code, and it
+controls everything - the legs, the camera, and the sensors.
+
+
+================================================================
+  THE BIG PICTURE - HOW DOES IT ALL CONNECT?
+================================================================
+
+Here is the chain of how everything talks to each other:
+
+  YOUR PHONE / LAPTOP (the Dashboard website)
+          |
+          |  WiFi
+          |
+  ESP8266 CHIP (the robot's brain - runs your code)
+          |
+          |  I2C wires (a special shared wire for data)
+          |
+  TWO SERVO BOARDS called PCA9685
+  (PCA1 controls the RIGHT 3 legs + camera)
+  (PCA2 controls the LEFT  3 legs)
+          |
+          |
+  18 SERVO MOTORS (the muscles of each leg)
+
+The ESP8266 also talks to:
+  - A DHT11 sensor (reads temperature and humidity)
+  - An MQ135 sensor (smells the air quality)
+  - A camera (takes a video stream you see on the dashboard)
+
+
+================================================================
+  THE CODE FILES - WHAT IS EACH FILE FOR?
+================================================================
+
+main.cpp  --  This is the MAIN BRAIN file.
+              It runs on the ESP8266 chip inside the robot.
+              It controls the legs, reads sensors, handles WiFi,
+              and responds to every button you press.
+
+index.html  --  This is the DASHBOARD website.
+                When you open a browser and connect to the
+                robot's WiFi, this is what you see.
+                It has all the buttons and displays.
+
+script.js  --  This is the BRAIN of the dashboard website.
+               It sends your button presses to the robot and
+               updates what you see on screen in real time.
+
+style.css  --  This makes the dashboard look cool!
+               Colors, fonts, layouts - all controlled here.
+
+
+================================================================
+  HOW THE ROBOT STARTS UP  (the setup() function)
+================================================================
+
+When you turn on the robot, these things happen in order:
+
+  1. The chip wakes up and starts the Serial port
+     (so you can see messages on your computer screen)
+
+  2. It turns ON the two servo boards (PCA1 and PCA2)
+
+  3. All 18 leg servos go to position 90 degrees
+     (this is the "standing still" position - straight ahead)
+
+  4. The camera pan/tilt servos also go to 90 degrees
+     (camera looks straight forward)
+
+  5. The temperature/humidity sensor (DHT11) turns on
+
+  6. The robot creates its own WiFi hotspot
+     (look for "HEXAPOD" in your WiFi settings!)
+
+  7. A web server starts on port 80
+     (this serves the dashboard page when you open the browser)
+
+  8. A WebSocket server starts on port 81
+     (this is the live two-way channel for instant commands)
+
+  9. ESP-NOW radio is turned on
+     (this lets the robot talk to the satellite station)
+
+After all that, the robot is ready and waiting for your commands!
+
+
+================================================================
+  HOW THE ROBOT KEEPS RUNNING  (the loop() function)
+================================================================
+
+After setup, the robot runs a loop forever, checking things:
+
+  Every loop tick:
+    - Check for new messages from the dashboard
+    - Check for movement commands from the satellite
+    - If it is walking, take the next walk step
+    - Relay any chat messages from the satellite to the dashboard
+
+  Every 5 seconds:
+    - Read the temperature, humidity, and air quality sensors
+    - Send that sensor data to the dashboard
+
+  When a gesture is waiting (wave, dance):
+    - Only starts the gesture when the robot is NOT walking
+    - This prevents the robot from crashing itself!
+
+
+================================================================
+  HOW THE LEGS MOVE - THE WALKING GAIT
+================================================================
+
+Each leg has 3 joints. Here are their names (like a real insect):
+
+  COXA  = the hip joint   (moves the leg left and right)
+  FEMUR = the knee joint  (lifts the leg up and down)
+  TIBIA = the ankle joint (extends the foot forward/back)
+
+The robot uses a TRIPOD GAIT. Imagine splitting the 6 legs
+into two groups:
+
+  Group A: Front-Left,  Mid-Right, Rear-Left   (legs 1, 5, 3)
+  Group B: Front-Right, Mid-Left,  Rear-Right  (legs 4, 2, 6)
+
+While Group A's feet are on the ground pushing, Group B's
+feet lift up and swing forward. Then they swap. Then swap again.
+This keeps the robot balanced at all times - just like you
+balance on one foot when you walk!
+
+Each full walk cycle has 4 steps. The code smoothly moves
+between each step (10 tiny in-between positions) so the robot
+moves like it is gliding instead of jerking.
+
+
+HOW DIRECTION CHANGES WORK:
+  Forward   - both sides push backward equally
+  Backward  - both sides push forward equally
+  Turn Left - left legs push one way, right legs push other
+  Turn Right- the opposite of turn left
+
+The SPEED slider controls how fast each step happens.
+The STRIDE slider controls how big each step is (in degrees).
+The HEIGHT slider raises or lowers all the legs at once.
+
+
+================================================================
+  THE SPECIAL MOVES  (Wave, Dance, and more)
+================================================================
+
+WAVE (waveHand):
+  Only leg 1 (front-left) moves.
+  1. The femur (knee) lifts UP
+  2. The tibia (ankle) swings OUT
+  3. The coxa (hip) swings side to side twice
+  4. Leg goes back to resting position
+  Total time: about 3 seconds
+
+
+DANCE (danceMove):
+  All 6 legs participate!
+  1. Left legs tilt one way, right legs tilt the other
+  2. Then they swap directions
+  3. Then the hip joints swing left and right together
+  This whole pattern repeats 3 times
+  Total time: about 6 seconds
+
+
+WAVE ALL LEFT / WAVE ALL RIGHT  (waveAll_Left, waveAll_Right):
+  All 6 legs lift up together and wave!
+  The whole robot does a big wave motion.
+  Total time: about 5 seconds
+
+
+Important note: The robot WAITS to finish walking before
+starting a dance or wave. This protects the servos.
+
+
+================================================================
+  THE CAMERA
+================================================================
+
+The camera is mounted on the robot's body and can move in
+two directions:
+
+  PAN  = looks left and right  (0 to 180 degrees)
+  TILT = looks up and down     (0 to 180 degrees)
+
+The camera lives at address: 192.168.5.2 on port 81
+
+On the dashboard you can:
+  - Drag the PAN slider to look left or right
+  - Drag the TILT slider to look up or down
+  - Press the CENTER button to reset to straight ahead
+  - Use arrow keys on your keyboard for smooth camera movement
+  - Toggle the CROSSHAIR button to show/hide aim lines
+  - See the live FPS (frames per second) in the corner
+
+
+================================================================
+  THE ENVIRONMENT SENSORS
+================================================================
+
+TEMPERATURE (DHT11 sensor - pin D6):
+  Measures how hot or cold the air is in degrees Celsius.
+  Updates every 5 seconds.
+
+HUMIDITY (DHT11 sensor - same chip):
+  Measures how much water is in the air (0-100 percent).
+  100 percent means the air is very wet.
+
+AIR QUALITY / AQI (MQ135 gas sensor - pin A0):
+  This sensor smells the air! It gives a number from 0 to 500.
+  0-50   = GOOD  (green)
+  51-100 = MODERATE (yellow)
+  101-150= SENSITIVE (orange) - bad for people with allergies
+  151-200= UNHEALTHY (red)
+  200+   = HAZARDOUS (purple) - everyone is affected
+
+CO2 ESTIMATE (also from the MQ135 sensor):
+  Estimates carbon dioxide in the air in ppm (parts per million).
+  FRESH   = below 600 ppm
+  NORMAL  = 600-1000 ppm
+  HIGH    = 1000-2000 ppm
+  DANGER  = above 2000 ppm
+
+WiFi SIGNAL STRENGTH (RSSI):
+  Shows how strong the WiFi connection is.
+  4 bars = STRONG
+  3 bars = GOOD
+  2 bars = FAIR
+  1 bar  = WEAK
+  0 bars = POOR
+
+
+================================================================
+  THE DASHBOARD - WHAT EACH SECTION DOES
+================================================================
+
+(Open a browser, connect to HEXAPOD WiFi, go to 192.168.4.1)
+
+LEFT COLUMN:
+
+  SYSTEM STATUS  -  Shows if the robot is connected or not.
+                    Also shows the current speed, stride, and
+                    height values in real time.
+                    The WiFi bars show signal strength.
+                    The badge shows IDLE / FORWARD / etc.
+
+  CONTROLS  -  Three sliders:
+    SPEED  slider: 100ms (fast) to 1000ms (slow)
+    STRIDE slider: 10 to 45 degrees per step
+    HEIGHT slider: -30 (crouch) to +30 (stand tall)
+
+  ACTIONS  -  Buttons for special moves:
+    WAVE   = robot waves its front-left leg
+    DANCE  = robot does a full body dance
+    CENTER = all 18 servos go to 90 degrees (safe reset)
+    SERVOS = opens the servo test panel (see below)
+    WAVE L / WAVE R = coming soon!
+
+  SATELLITE LINK  -  Controls the ESP-NOW radio link.
+    Press CONNECT to activate the satellite station link.
+    Once connected, a chat window appears so you can send
+    text messages to the satellite station or the rover.
+    Messages from the satellite appear here automatically.
+
+
+CENTER COLUMN:
+
+  CAMERA FEED  -  Live video from the robot's camera.
+                  Shows FPS, crosshair, pan and tilt angles.
+                  Sliders below let you aim the camera.
+
+  ENVIRONMENT SENSORS  -  Four boxes showing:
+                           Temperature, Humidity, AQI, CO2
+                           Each has a color bar that fills up.
+
+
+RIGHT COLUMN:
+
+  MOVEMENT (D-PAD)  -  A directional pad like a game controller.
+    UP arrow   = Walk Forward     (also press W key)
+    DOWN arrow = Walk Backward    (also press S key)
+    LEFT arrow = Turn Left        (also press A key)
+    RIGHT arrow= Turn Right       (also press D key)
+    STOP button= Stop moving      (also press SPACEBAR)
+    Arrow keys on keyboard = move camera
+
+  HEX STATUS  -  A tiny drawing of the hexapod from above.
+                 When the robot walks, you will see the legs
+                 light up and animate alternating groups!
+                 Shows IDLE / FORWARD / BACKWARD / etc.
+
+  ACTIVITY LOG  -  A scrolling list of recent actions with
+                   timestamps. Turns blue for walks, cyan for
+                   turns, red for stops, purple for gestures.
+
+
+SERVO TEST PANEL (click SERVOS button):
+  Shows ALL 18 servos organized by leg and joint.
+  LEFT side (PCA2 board): Legs 1, 2, 3
+  RIGHT side (PCA1 board): Legs 4, 5, 6
+  You can drag each slider to test any single servo.
+  Each card shows the current angle and PWM value.
+  Press Escape or click outside to close it.
+
+
+================================================================
+  THE SATELLITE LINK  (ESP-NOW radio)
+================================================================
+
+ESP-NOW is a special wireless technology that lets two ESP
+chips talk to each other without needing the internet or a
+WiFi router. It is very fast and works even when the robot
+is moving around!
+
+How it works:
+  1. Press CONNECT in the dashboard Satellite Link panel
+  2. The robot's radio connects to the satellite station
+     (the satellite station is another ESP chip nearby)
+  3. Now you can send text messages back and forth
+  4. The robot also automatically sends its sensor readings
+     (temperature, humidity, etc.) to the satellite every 2 seconds
+  5. The satellite station can also send MOVEMENT COMMANDS
+     to the robot (forward, backward, left, right, stop)
+  6. The satellite can also relay messages to the rover
+
+TO field (who receives your chat):
+  SATELLITE      = sends message to the satellite station only
+  ROVER VIA SAT  = sends message to the rover, through satellite
+  BOTH           = sends to both the satellite AND the rover
+
+
+================================================================
+  HOW COMMANDS TRAVEL FROM YOUR HAND TO THE LEGS
+================================================================
+
+Here is the full journey of one button press:
+
+  Step 1: You press "WALK" on the dashboard
+  Step 2: Your browser sends a message {"type":"startWalk"}
+          through the WebSocket connection to the robot
+  Step 3: The ESP8266 receives it and sets isWalking = true
+  Step 4: Every 500 milliseconds (the speed you set), the
+          robot calculates where all 18 servos need to go
+  Step 5: It smoothly moves the servos in 10 tiny steps
+          so the movement looks natural and smooth
+  Step 6: The dashboard shows the walking animation
+  Step 7: You press STOP - the robot hears it and resets
+          all servos back to 90 degrees
+
+That is it! The same basic journey happens for every command.
+
+
+================================================================
+  USEFUL THINGS TO KNOW
+================================================================
+
+WiFi password to connect to the robot: hexapod123
+
+Dashboard address in your browser: 192.168.4.1
+
+Robot hostname on the network: Hexapod-AP
+
+OTA update password (upload new code wirelessly): hexapod123
+
+All servos center position = 90 degrees
+  (this is the safe resting position)
+
+Left legs use servo numbers:  0, 1, 2, 3, 4, 5, 6, 7, 8
+Right legs use servo numbers: 9, 10, 11, 12, 13, 14, 15, 16, 17
+
+For each leg, the three joints are:
+  First number  = Coxa  (hip)
+  Second number = Femur (knee)
+  Third number  = Tibia (ankle)
+
+Example: Leg 1 = servos 0 (coxa), 1 (femur), 2 (tibia)
+Example: Leg 4 = servos 9 (coxa), 10 (femur), 11 (tibia)
+
+Height offset is saved to the robot's memory (EEPROM), so
+it remembers your height setting even when you turn it off!
+
+
+================================================================
+  KEYBOARD SHORTCUTS  (when dashboard is open)
+================================================================
+
+  W          = Walk forward
+  S          = Walk backward
+  A          = Turn left
+  D          = Turn right
+  SPACEBAR   = STOP
+  Arrow Left / Right = Move camera left / right
+  Arrow Up / Down    = Move camera up / down
+  C          = Toggle crosshair on camera
+  R          = Reload the camera stream
+  ESCAPE     = Close the servo test panel
+
+
+================================================================
+  WELL DONE!
+================================================================
+
+You have built a robot that:
+  - Walks in 4 directions
+  - Dances and waves
+  - Reads the temperature and air quality
+  - Streams live video
+  - Communicates with a satellite station
+  - Can be controlled from any phone or laptop over WiFi
+
+That is seriously impressive. Keep building and keep exploring!
+
+==============================================================
+                  HEXAPOD  -  Stable Release
+==============================================================

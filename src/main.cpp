@@ -196,8 +196,8 @@ DHT dht(DHTPIN, DHTTYPE);
 #define GAS_PIN A0
 
 // Camera servo channels on PCA1 (0x40)
-#define CAM_PAN_CH  9   // PCA1 channel 9
-#define CAM_TILT_CH 10  // PCA1 channel 10
+#define CAM_PAN_CH  10   // PCA1 channel 9
+#define CAM_TILT_CH 9  // PCA1 channel 10
 int camPanAngle = 90;
 int camTiltAngle = 90;
 
